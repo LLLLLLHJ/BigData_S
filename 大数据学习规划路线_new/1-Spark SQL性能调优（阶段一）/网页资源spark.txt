@@ -10,5 +10,9 @@ https://tech.meituan.com/2016/04/29/spark-tuning-basic.html?spm=5176.28103460.0.
 4、spark性能优化指南-高级篇（美团技术团队）：
 https://tech.meituan.com/2016/05/12/spark-tuning-pro.html?spm=5176.28103460.0.0.39f22988vyt9ZY
 
+5、如何快速上手Spark：The Definitive Guide新手入门教程：
+https://blog.csdn.net/gitblog_00614/article/details/156152694
 
+6、Spark Getting Started（官方文档）:
+https://spark.apache.org/docs/latest/api/python/getting_started/index.html
 
