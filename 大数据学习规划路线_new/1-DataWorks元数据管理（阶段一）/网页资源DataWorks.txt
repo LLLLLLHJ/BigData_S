@@ -1,0 +1,10 @@
+1、大数据开发治理平台DataWorks配置中心文档：
+https://help.aliyun.com/zh/dataworks/user-guide/configuration-management/
+
+2、数字资产价值评估指南（国家标准）：
+https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=E8FC4287D33C09FF06D0393F36303693
+
+3、51cto博客-数据管理之元数据管理：
+https://blog.51cto.com/u_14637492/4895826
+
+
