@@ -1,4 +1,4 @@
-# 哔站【40分钟速通】分布式计算框架Spark
+# 1>>哔站【40分钟速通】分布式计算框架Spark
 
 ## sparkRDD与编程模型
 
@@ -133,6 +133,199 @@ Spark程序的运行架构是一个典型的**主从架构（Master-Slave）**�
 * 下图的左图对应**YARN-Cluster**模式，右图对应**YARN-Client**模式（为了便于客户端调试，将Driver放到客户端client里面）
 
 ![image-20260621181609756](C:\Users\l\AppData\Roaming\Typora\typora-user-images\image-20260621181609756.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 2>>Spark性能调优实战
+
+## 01-性能调优的必要性
+
+### 开发案例 1：数据抽取
+
+案例：给定数据条目，从中抽取特定字段。这样的数据处理需求在平时
+的 ETL 作业中相当普遍。想要实现这个需求，我们需要定义一个函数 extractFields：
+它的输入参数是 Seq[Row]类型，也即数据条目序列；输出结果的返回类型是
+Seq[(String, Int)]，也就是（String, Int）对儿的序列；函数的计算逻辑是从数据条目
+中抽取索引为 2 的字符串和索引为 4 的整型。
+
+**scala**
+
+```scala
+//实现方案1 —— 反例
+val extractFields: Seq[Row] => Seq[(String, Int)] = {
+    (rows: Seq[Row]) => {
+        var fields = Seq[(String, Int)]()
+        rows.map(row => {
+        	fields = fields :+ (row.getString(2), row.getInt(4))
+        })
+        fields
+    }
+}
+
+
+//实现方案2 —— 正例
+val extractFields: Seq[Row] => Seq[(String, Int)] = {
+	(rows: Seq[Row]) =>
+		rows.map(row => (row.getString(2), row.getInt(4))).toSeq
+}
+```
+
+**python**
+
+```python
+# 实现方案1 —— 反例【使用可变变量和循环，效率低下】
+# 注意：在 PySpark 中，通常是在 RDD 的 map 算子中处理单行数据，
+# 而不是像 Scala 示例那样处理 Seq[Row]。
+# 但为了忠实于原文逻辑，这里模拟对一组数据的处理函数。
+
+def extract_fields_bad(rows):
+    fields = []
+    for row in rows:
+        # 假设 row 是一个可以通过索引访问的对象，如 list 或 Row
+        fields.append((row[2], row[4]))
+    return fields
+
+
+# 实现方案2 —— 正例【使用函数式编程 (map)，简洁高效】
+def extract_fields_good(rows):
+    # 利用 map 和 lambda 表达式
+    return list(map(lambda row: (row[2], row[4]), rows))
+# 或者在 RDD 操作中直接使用：
+# rdd.map(lambda row: (row[2], row[4]))
+
+```
+
+
+
+### 开发案例 2：数据过滤与数据聚合
+
+```scala
+/**
+(startDate, endDate)
+e.g. ("2021-01-01", "2021-01-31")
+*/
+val pairDF: DataFrame = _
+/**
+(dim1, dim2, dim3, eventDate, value)
+e.g. ("X", "Y", "Z", "2021-01-15", 12)
+*/
+val factDF: DataFrame = _
+// Storage root path
+val rootPath: String = _
+```
+
+在这个案例中，我们有两份数据，分别是 pairDF 和 factDF，数据类型都是DataFrame。第一份数据 pairDF 的 Schema 包含两个字段，分别是开始日期和结束日期。第二份数据的字段较多，不过最主要的字段就两个，一个是 Event date 事件日期，另一个是业务关心的统计量，取名为 Value。其他维度如 dim1、dim2、dim3 主要用于数据分组，具体含义并不重要。从数据量来看，pairDF 的数据量很小，大概几百条记录，factDF 数据量很大，有上千万行。
+对于这两份数据来说，具体的业务需求可以拆成 3 步：
+
+1. 对于 pairDF 中的每一组时间对，从 factDF 中过滤出 Event date 落在其间的数据条目；
+2. 从 dim1、dim2、dim3 和 Event date 4 个维度对 factDF 分组，再对业务统计量Value 进行汇总；
+3. 将最终的统计结果落盘到 Amazon S3。
+
+**scala**
+
+```scala
+//实现方案1 —— 反例
+def createInstance(factDF: DataFrame, startDate: String, endDate: String): DataFrame = {
+    val instanceDF = factDF
+    .filter(col("eventDate") > lit(startDate) && col("eventDate") <= lit(endDate))
+    .groupBy("dim1", "dim2", "dim3", "event_date")
+    .agg(sum("value") as "sum_value")
+    instanceDF
+}
+pairDF.collect.foreach{
+    case (startDate: String, endDate: String) =>
+    val instance = createInstance(factDF, startDate, endDate)
+    val outPath = s"${rootPath}/endDate=${endDate}/startDate=${startDate}"
+    instance.write.parquet(outPath)
+}
+
+
+//实现方案2 —— 正例
+val instances = factDF
+.join(pairDF, factDF("eventDate") > pairDF("startDate") && factDF("eventDate") <= pairDF("endDate"))
+.groupBy("dim1", "dim2", "dim3", "eventDate", "startDate", "endDate")
+.agg(sum("value") as "sum_value")
+instances.write.partitionBy("endDate", "startDate").parquet(rootPath)
+```
+
+**python**
+
+```python
+# 实现方案1 —— 反例【在 Driver 端收集小表，然后循环遍历，导致大表被反复扫描】
+from pyspark.sql.functions import col, lit, sum as _sum
+
+def create_instance_bad(fact_df, start_date, end_date):
+    instance_df = fact_df \
+        .filter((col("eventDate") > lit(start_date)) & (col("eventDate") <= lit(end_date))) \
+        .groupBy("dim1", "dim2", "dim3", "event_date") \
+        .agg(_sum("value").alias("sum_value"))
+    return instance_df
+
+# 假设 pair_df 是小表，fact_df 是大表
+# 这种写法会导致 fact_df 被扫描 pair_df.count() 次
+for row in pair_df.collect():
+    start_date = row['startDate']
+    end_date = row['endDate']
+    
+    instance = create_instance_bad(fact_df, start_date, end_date)
+    out_path = f"{root_path}/endDate={end_date}/startDate={start_date}"
+    instance.write.parquet(out_path)
+    
+
+
+# 实现方案2 —— 正例【使用 Join 代替循环，一次性扫描大表】
+from pyspark.sql.functions import col, sum as _sum
+
+# 使用不等式 Join
+# 注意：PySpark 中 Join 条件需要用括号包起来，或者使用字符串表达式
+instances = fact_df.join(
+    pair_df,
+    (fact_df.eventDate > pair_df.startDate) & (fact_df.eventDate <= pair_df.endDate),
+    "inner"
+) \
+.groupBy("dim1", "dim2", "dim3", "eventDate", "startDate", "endDate") \
+.agg(_sum("value").alias("sum_value"))
+
+instances.write.partitionBy("endDate", "startDate").parquet(root_path)
+```
+
+
+
+![image-20260621215428646](C:\Users\l\AppData\Roaming\Typora\typora-user-images\image-20260621215428646.png)
+
+
+
+## 02-性能调优的本质
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
